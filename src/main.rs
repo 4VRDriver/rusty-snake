@@ -17,17 +17,19 @@ const TICKS_PER_SEC: u16 = 15;
 struct Controller {
     should_close: bool,
     event_queue: Arc<Mutex<Vec<event::Event>>>,
-    last_event: event::Event,
+    last_event: Option<event::Event>,
 }
 
 fn draw(writer: &mut impl Write, controller: &Controller) -> crossterm::Result<()> {
 
     writer.execute(terminal::Clear(terminal::ClearType::All))?;
 
-    writer
-        .queue(cursor::MoveTo(20, 2))?
-        .queue(style::PrintStyledContent("Got: ".magenta()))?
-        .queue(style::PrintStyledContent(format!("{:?}", controller.last_event).red().bold()))?;
+    if let Some(event) = controller.last_event {
+        writer
+            .queue(cursor::MoveTo(20, 2))?
+            .queue(style::PrintStyledContent("Got: ".magenta()))?
+            .queue(style::PrintStyledContent(format!("{:?}", event).red().bold()))?;
+    }
 
     draw_borders(writer)?;
     writer.flush()?;
@@ -38,20 +40,26 @@ fn draw(writer: &mut impl Write, controller: &Controller) -> crossterm::Result<(
 fn draw_borders(writer: &mut impl Write) -> crossterm::Result<()> {
     let (terminal_width, terminal_height) = terminal::size()?;
 
+    let left_border = (terminal_width / 2).saturating_sub(CANVAS_WIDTH / 2);
+    let right_border = terminal_width / 2 + CANVAS_WIDTH / 2;
+    
+    let upper_border = (terminal_height / 2).saturating_sub(CANVAS_HEIGHT / 4);
+    let lower_border = terminal_height / 2 + CANVAS_HEIGHT / 4;
+
     // Vertical lines
-    for i in (terminal_height / 2 - CANVAS_HEIGHT / 4)..=(terminal_height / 2 + CANVAS_HEIGHT / 4) {
+    for i in upper_border..=lower_border {
         writer
-            .queue(cursor::MoveTo(terminal_width / 2 - CANVAS_WIDTH / 2, i))?
+            .queue(cursor::MoveTo(left_border, i))?
             .queue(style::Print("│"))?
-            .queue(cursor::MoveTo(terminal_width / 2 + CANVAS_WIDTH / 2, i))?
+            .queue(cursor::MoveTo(right_border, i))?
             .queue(style::Print("│"))?;
     }
 
     // Horizontal lines and corners
     writer
         .queue(cursor::MoveTo(
-            terminal_width / 2 - CANVAS_WIDTH / 2,
-            terminal_height / 2 - CANVAS_HEIGHT / 4,
+            left_border,
+            upper_border,
         ))?
         .queue(style::Print("╭"))?
         .queue(style::Print("─".repeat(CANVAS_WIDTH as usize - 1)))?
@@ -59,8 +67,8 @@ fn draw_borders(writer: &mut impl Write) -> crossterm::Result<()> {
 
     writer
         .queue(cursor::MoveTo(
-            terminal_width / 2 - CANVAS_WIDTH / 2,
-            terminal_height / 2 + CANVAS_HEIGHT / 4,
+            left_border,
+            lower_border,
         ))?
         .queue(style::Print("╰"))?
         .queue(style::Print("─".repeat(CANVAS_WIDTH as usize - 1)))?
@@ -77,10 +85,10 @@ fn handle_events(controller: &mut Controller) {
                     if event.code == event::KeyCode::Char('q') {
                         controller.should_close = true;
                     }
-                    controller.last_event = event::Event::Key(event);
+                    controller.last_event = Some(event::Event::Key(event));
                 },
-                event::Event::Mouse(event) => controller.last_event = event::Event::Mouse(event),
-                event::Event::Resize(x, y) => controller.last_event = event::Event::Resize(x, y),
+                event::Event::Mouse(event) => controller.last_event = Some(event::Event::Mouse(event)),
+                event::Event::Resize(x, y) => controller.last_event = Some(event::Event::Resize(x, y)),
             }
         }
     }
@@ -98,7 +106,7 @@ fn main() -> crossterm::Result<()> {
     let mut game_controller = Controller {
         should_close: false,
         event_queue: Arc::new(Mutex::new(Vec::new())),
-        last_event: event::Event::Resize(0, 0),
+        last_event: None,
     };
 
     let (terminate_event_tx, terminate_event_rx) = mpsc::channel();
