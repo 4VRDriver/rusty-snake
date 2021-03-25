@@ -8,10 +8,12 @@ use crossterm::{
     terminal, ExecutableCommand, QueueableCommand,
 };
 
-const CANVAS_WIDTH: u16 = 50;
-const CANVAS_HEIGHT: u16 = 50;
+const CANVAS_WIDTH: u16 = 46;
+const CANVAS_HEIGHT: u16 = 46;
 
-const TICKS_PER_SEC: u16 = 15;
+const TICKS_PER_SEC: u16 = 20;
+
+const BORDER_STYLE: [char; 6] = ['│', '─', '╭', '╮', '╰', '╯'];
 
 #[derive(Debug)]
 struct Controller {
@@ -50,9 +52,9 @@ fn draw_borders(writer: &mut impl Write) -> crossterm::Result<()> {
     for i in upper_border..=lower_border {
         writer
             .queue(cursor::MoveTo(left_border, i))?
-            .queue(style::Print("│"))?
+            .queue(style::Print(BORDER_STYLE[0]))?
             .queue(cursor::MoveTo(right_border, i))?
-            .queue(style::Print("│"))?;
+            .queue(style::Print(BORDER_STYLE[0]))?;
     }
 
     // Horizontal lines and corners
@@ -61,18 +63,18 @@ fn draw_borders(writer: &mut impl Write) -> crossterm::Result<()> {
             left_border,
             upper_border,
         ))?
-        .queue(style::Print("╭"))?
-        .queue(style::Print("─".repeat(CANVAS_WIDTH as usize - 1)))?
-        .queue(style::Print("╮"))?;
+        .queue(style::Print(BORDER_STYLE[2]))?
+        .queue(style::Print(BORDER_STYLE[1].to_string().repeat(CANVAS_WIDTH as usize - 1)))?
+        .queue(style::Print(BORDER_STYLE[3]))?;
 
     writer
         .queue(cursor::MoveTo(
             left_border,
             lower_border,
         ))?
-        .queue(style::Print("╰"))?
-        .queue(style::Print("─".repeat(CANVAS_WIDTH as usize - 1)))?
-        .queue(style::Print("╯"))?;
+        .queue(style::Print(BORDER_STYLE[4]))?
+        .queue(style::Print(BORDER_STYLE[1].to_string().repeat(CANVAS_WIDTH as usize - 1)))?
+        .queue(style::Print(BORDER_STYLE[5]))?;
 
     Ok(())
 }
@@ -98,7 +100,7 @@ fn main() -> crossterm::Result<()> {
     let mut stdout = stdout();
 
     terminal::enable_raw_mode()?;
-    //stdout.execute(event::EnableMouseCapture)?;
+    stdout.execute(event::EnableMouseCapture)?;
     stdout
         .execute(terminal::EnterAlternateScreen)?
         .execute(cursor::Hide)?;
@@ -169,6 +171,6 @@ fn main() -> crossterm::Result<()> {
     stdout
         .execute(terminal::LeaveAlternateScreen)?
         .execute(cursor::Show)?;
-    //writer.execute(event::DisableMouseCapture)?;
+    stdout.execute(event::DisableMouseCapture)?;
     terminal::disable_raw_mode()
 }
