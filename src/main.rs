@@ -111,10 +111,8 @@ fn main() -> crossterm::Result<()> {
         last_event: None,
     };
 
-    let (terminate_event_tx, terminate_event_rx) = mpsc::channel();
-
     let event_queue = Arc::clone(&game_controller.event_queue);
-    let event_handler = thread::spawn(move || -> crossterm::Result<()> {
+    let _ = thread::spawn(move || -> crossterm::Result<()> {
         loop {
             if event::poll(time::Duration::from_millis(100))? {
                 let event = event::read()?;
@@ -123,29 +121,15 @@ fn main() -> crossterm::Result<()> {
                     break;
                 }
             }
-
-            match terminate_event_rx.try_recv() {
-                Ok(_) | Err(TryRecvError::Disconnected) => {
-                    break Ok(());
-                }
-                Err(TryRecvError::Empty) => {}
-            }
         }
     });
 
-    let (tick_tx, tick_rx) = mpsc::channel();
-    let (terminate_tick_tx, terminate_tick_rx) = mpsc::channel();
+    // Create a sync channel with bound 0 so that it is absolutely synchronous.
+    let (tick_tx, tick_rx) = mpsc::sync_channel(0);
 
-    let tick_handler = thread::spawn(move || loop {
+    let _ = thread::spawn(move || loop {
         thread::sleep(time::Duration::from_millis(1000 / TICKS_PER_SEC as u64));
-        tick_tx.send(()).ok();
-
-        match terminate_tick_rx.try_recv() {
-            Ok(_) | Err(TryRecvError::Disconnected) => {
-                break;
-            }
-            Err(TryRecvError::Empty) => {}
-        }
+        tick_tx.send(()).expect("Could not send tick signal.");
     });
 
     for _ in tick_rx {
@@ -156,17 +140,6 @@ fn main() -> crossterm::Result<()> {
             break;
         }
     }
-
-    terminate_tick_tx.send(()).ok();
-    terminate_event_tx.send(()).ok();
-
-    event_handler
-        .join()
-        .expect("The event sender thread has panicked")?;
-
-    tick_handler
-        .join()
-        .expect("The tick sender thread has panicked");
 
     stdout
         .execute(terminal::LeaveAlternateScreen)?
