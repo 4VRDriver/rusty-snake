@@ -5,11 +5,9 @@ use std::{thread, time};
 
 use crossterm::{
     cursor, event,
-    style::{self, Colorize, Styler},
+    style::{self, Colorize},
     terminal, ExecutableCommand, QueueableCommand,
 };
-
-use rand::prelude::*;
 
 const CANVAS_WIDTH: u16 = 46;
 const CANVAS_HEIGHT: u16 = 46;
@@ -39,6 +37,7 @@ struct Controller {
     snake: Snake,
     apple: Option<(CanvasSpace, AppleType)>,
     score: u32,
+    losed: bool,
 }
 
 #[derive(Debug)]
@@ -85,23 +84,12 @@ fn draw(writer: &mut impl Write, controller: &Controller) -> crossterm::Result<(
     if let Some(event) = controller.last_event {
         writer
             .queue(cursor::MoveTo(20, 40))?
-            .queue(style::PrintStyledContent("Got: ".magenta()))?
+            .queue(style::PrintStyledContent("Got: ".grey()))?
             .queue(style::PrintStyledContent(
-                format!("{:?}", event).red().bold(),
+                format!("{:?}", event).dark_grey(),
             ))?;
     } else {
-        let logo = include_str!("logo.txt");
-        let line_len = logo.find('\n').expect("Logo has \\n");
-        let (terminal_width, terminal_height) = terminal::size()?;
-
-        for (index, line) in logo.split("\n").enumerate() {
-            writer
-                .queue(cursor::MoveTo(
-                    (terminal_width / 2).saturating_sub((line_len / 6) as u16),
-                    index as u16 + (terminal_height / 2).saturating_sub(2),
-                ))?
-                .queue(style::PrintStyledContent(line.dark_red()))?;
-        }
+        show_logo(writer)?;
     }
 
     writer.flush()?;
@@ -187,10 +175,10 @@ fn handle_events(controller: &mut Controller) {
                 event::Event::Mouse(event) => {
                     controller.last_event = Some(event::Event::Mouse(event))
                 }
-                event::Event::Resize(x, y) => {
-                    //controller.last_event = Some(event::Event::Resize(x, y))
-                    ()
-                }
+                /*event::Event::Resize(x, y) => {
+                    controller.last_event = Some(event::Event::Resize(x, y))
+                }*/
+                _ => ()
             }
         }
     }
@@ -198,8 +186,6 @@ fn handle_events(controller: &mut Controller) {
 
 fn continue_game_logic(controller: &mut Controller) {
     let snake = &mut controller.snake;
-
-    let mut lose = false;
 
     match controller.last_event {
         Some(event::Event::Key(keyevent)) => match keyevent.code {
@@ -235,7 +221,7 @@ fn continue_game_logic(controller: &mut Controller) {
             Direction::Right if *x < (CANVAS_WIDTH / 2 - 2) as u32 => *x += 1,
             Direction::Up if *y > 0 => *y -= 1,
             Direction::Down if *y < (CANVAS_HEIGHT / 2 - 3) as u32 => *y += 1,
-            _ => lose = true,
+            _ => controller.losed = true,
         }
     }
 
@@ -268,13 +254,40 @@ fn continue_game_logic(controller: &mut Controller) {
         }
 
         if snake.elements.get(0).expect("Snake has at least one element.") == current {
-            lose = true;
+            controller.losed = true;
         }
     }
+}
 
-    if lose {
-        eprintln!("Losed!");
+fn show_logo(writer: &mut impl Write) -> crossterm::Result<()> {
+    let logo = include_str!("logo.txt");
+    let line_len = logo.find('\n').expect("Logo has \\n");
+    let (terminal_width, terminal_height) = terminal::size()?;
+
+    for (index, line) in logo.split("\n").enumerate() {
+        writer
+            .queue(cursor::MoveTo(
+                (terminal_width / 2).saturating_sub((line_len / 6) as u16),
+                index as u16 + (terminal_height / 2).saturating_sub(2),
+            ))?
+            .queue(style::PrintStyledContent(line.dark_red()))?;
     }
+    Ok(())
+}
+
+fn show_endscreen(writer: &mut impl Write, controller: &Controller) -> crossterm::Result<()> {
+    show_logo(writer)?;
+
+    let score_message = format!("Your Score: {}", controller.score);
+
+    let (terminal_width, terminal_height) = terminal::size()?;
+
+    writer
+        .queue(cursor::MoveTo((terminal_width / 2).saturating_sub(score_message.len() as u16/2), (terminal_height / 2).saturating_add(5),))?
+        .queue(style::Print(score_message))?;
+
+    writer.flush()?;
+    Ok(())
 }
 
 fn main() -> crossterm::Result<()> {
@@ -299,6 +312,7 @@ fn main() -> crossterm::Result<()> {
         },
         apple: None,
         score: 0,
+        losed: false,
     };
 
     let event_queue = Arc::clone(&game_controller.event_queue);
@@ -319,13 +333,18 @@ fn main() -> crossterm::Result<()> {
 
     let _ = thread::spawn(move || loop {
         thread::sleep(time::Duration::from_millis(1000 / TICKS_PER_SEC as u64));
-        tick_tx.send(()).expect("Could not send tick signal.");
+        tick_tx.try_send(()).ok();
     });
 
     for _ in tick_rx {
         handle_events(&mut game_controller);
-        continue_game_logic(&mut game_controller);
-        draw(&mut stdout, &game_controller)?;
+
+        if !game_controller.losed {
+            continue_game_logic(&mut game_controller);
+            draw(&mut stdout, &game_controller)?;
+        } else {
+            show_endscreen(&mut stdout, &game_controller)?;
+        }
 
         if game_controller.should_close {
             break;
