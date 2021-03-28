@@ -1,4 +1,5 @@
 use std::io::{stdout, Write};
+use std::ops::Deref;
 use std::sync::{mpsc, Arc, Mutex};
 use std::{thread, time};
 
@@ -8,6 +9,8 @@ use crossterm::{
     terminal, ExecutableCommand, QueueableCommand,
 };
 
+use rand::prelude::*;
+
 const CANVAS_WIDTH: u16 = 46;
 const CANVAS_HEIGHT: u16 = 46;
 
@@ -15,7 +18,10 @@ const TICKS_PER_SEC: u16 = 10;
 
 const BORDER_STYLE: [char; 6] = ['│', '─', '╭', '╮', '╰', '╯'];
 
-const APPLE: [char; 2] = ['🍎','🍏'];
+const APPLE: [char; 2] = ['🍎', '🍏'];
+
+#[derive(Debug)]
+struct AppleType(char);
 
 #[derive(Debug, PartialEq)]
 enum Direction {
@@ -31,6 +37,8 @@ struct Controller {
     event_queue: Arc<Mutex<Vec<event::Event>>>,
     last_event: Option<event::Event>,
     snake: Snake,
+    apple: Option<(CanvasSpace, AppleType)>,
+    score: u32,
 }
 
 #[derive(Debug)]
@@ -39,9 +47,9 @@ struct Snake {
     current_direction: Direction,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 struct CanvasSpace((u32, u32));
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 struct TerminalSpace((u32, u32));
 
 impl From<CanvasSpace> for TerminalSpace {
@@ -49,34 +57,49 @@ impl From<CanvasSpace> for TerminalSpace {
         let (terminal_width, terminal_height) = terminal::size().unwrap();
 
         TerminalSpace((
-            (terminal_width / 2).saturating_sub(CANVAS_WIDTH / 2) as u32 + canvas_space.0 .0 as u32 * 2 + 1,
+            (terminal_width / 2).saturating_sub(CANVAS_WIDTH / 2) as u32
+                + canvas_space.0 .0 as u32 * 2
+                + 1,
             (terminal_height / 2).saturating_sub(CANVAS_HEIGHT / 4) as u32
-                + canvas_space.0 .1 as u32 + 1,
+                + canvas_space.0 .1 as u32
+                + 1,
         ))
+    }
+}
+
+impl Deref for AppleType {
+    type Target = char;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
 fn draw(writer: &mut impl Write, controller: &Controller) -> crossterm::Result<()> {
     writer.queue(terminal::Clear(terminal::ClearType::All))?;
-      
+
     draw_borders(writer)?;
     draw_snake(writer, &controller.snake)?;
+    draw_apple(writer, controller)?;
 
     if let Some(event) = controller.last_event {
-            writer
-                .queue(cursor::MoveTo(20, 40))?
-                .queue(style::PrintStyledContent("Got: ".magenta()))?
-                .queue(style::PrintStyledContent(
-                    format!("{:?}", event).red().bold(),
-                ))?;
+        writer
+            .queue(cursor::MoveTo(20, 40))?
+            .queue(style::PrintStyledContent("Got: ".magenta()))?
+            .queue(style::PrintStyledContent(
+                format!("{:?}", event).red().bold(),
+            ))?;
     } else {
         let logo = include_str!("logo.txt");
         let line_len = logo.find('\n').expect("Logo has \\n");
         let (terminal_width, terminal_height) = terminal::size()?;
 
-        for (index, line) in logo.split("\r\n").enumerate() {
+        for (index, line) in logo.split("\n").enumerate() {
             writer
-                .queue(cursor::MoveTo((terminal_width / 2).saturating_sub((line_len / 6) as u16), index as u16 + (terminal_height / 2).saturating_sub(2)))?
+                .queue(cursor::MoveTo(
+                    (terminal_width / 2).saturating_sub((line_len / 6) as u16),
+                    index as u16 + (terminal_height / 2).saturating_sub(2),
+                ))?
                 .queue(style::PrintStyledContent(line.dark_red()))?;
         }
     }
@@ -86,12 +109,23 @@ fn draw(writer: &mut impl Write, controller: &Controller) -> crossterm::Result<(
     Ok(())
 }
 
-fn draw_snake(writer: &mut impl Write, snake: &Snake) -> crossterm::Result<()> {
+fn draw_apple(writer: &mut impl Write, controller: &Controller) -> crossterm::Result<()> {
+    if let Some(apple) = &controller.apple {
+        let rand_pos = TerminalSpace::from(apple.0.clone());
 
+        writer
+            .queue(cursor::MoveTo(rand_pos.0 .0 as u16, rand_pos.0 .1 as u16))?
+            .queue(style::Print(*apple.1))?;
+    }
+
+    Ok(())
+}
+
+fn draw_snake(writer: &mut impl Write, snake: &Snake) -> crossterm::Result<()> {
     for element in snake.elements.clone() {
         let position = TerminalSpace::from(element);
         writer
-            .queue(cursor::MoveTo(position.0.0 as u16, position.0.1 as u16))?
+            .queue(cursor::MoveTo(position.0 .0 as u16, position.0 .1 as u16))?
             .queue(style::PrintStyledContent("██".red()))?;
     }
 
@@ -165,39 +199,82 @@ fn handle_events(controller: &mut Controller) {
 fn continue_game_logic(controller: &mut Controller) {
     let snake = &mut controller.snake;
 
+    let mut lose = false;
+
     match controller.last_event {
-        Some(event::Event::Key(keyevent)) => {
-            match keyevent.code {
-                event::KeyCode::Up => snake.current_direction = Direction::Up,
-                event::KeyCode::Down => snake.current_direction = Direction::Down,
-                event::KeyCode::Left => snake.current_direction = Direction::Left,
-                event::KeyCode::Right => snake.current_direction = Direction::Right,
-                _ => (),
-            }
+        Some(event::Event::Key(keyevent)) => match keyevent.code {
+            event::KeyCode::Up if snake.current_direction != Direction::Down => snake.current_direction = Direction::Up,
+            event::KeyCode::Down if snake.current_direction != Direction::Up => snake.current_direction = Direction::Down,
+            event::KeyCode::Left if snake.current_direction != Direction::Right => snake.current_direction = Direction::Left,
+            event::KeyCode::Right if snake.current_direction != Direction::Left => snake.current_direction = Direction::Right,
+            _ => (),
         },
         _ => (),
     }
 
-    if snake.current_direction != Direction::Stop {        
-        let first_element = snake.elements.get(0).expect("First element should exist.").clone();
-    
+    if snake.current_direction != Direction::Stop {
+        let first_element = snake
+            .elements
+            .get(0)
+            .expect("First element should exist.")
+            .clone();
+
         snake.elements.rotate_right(1);
-    
-        let new_first_element = snake.elements.get_mut(0).expect("First element should exist.");
-    
+
+        let new_first_element = snake
+            .elements
+            .get_mut(0)
+            .expect("First element should exist.");
+
         *new_first_element = first_element;
-    
+
         let (ref mut x, ref mut y) = new_first_element.0;
-    
+
         match snake.current_direction {
-            Direction::Left => *x -= 1,
-            Direction::Right => *x += 1,
-            Direction::Up => *y -= 1,
-            Direction::Down => *y += 1,
-            _ => (),
+            Direction::Left if *x > 0 => *x -= 1,
+            Direction::Right if *x < (CANVAS_WIDTH / 2 - 2) as u32 => *x += 1,
+            Direction::Up if *y > 0 => *y -= 1,
+            Direction::Down if *y < (CANVAS_HEIGHT / 2 - 3) as u32 => *y += 1,
+            _ => lose = true,
         }
     }
-    
+
+    // Check if snake collides with apple
+    if let Some((ref mut apple_pos, _)) = controller.apple {
+        if apple_pos == snake.elements.get(0).expect("First element should exist.") {
+            controller.apple = None;
+            controller.score += 1;
+            snake.elements.push(snake.elements.last().expect("Snake always has at least one element.").clone());
+        }
+    }
+
+    // Place new apple
+    if let None = controller.apple {
+        let rand_pos = (
+            (rand::random::<u16>() % (CANVAS_WIDTH / 2 - 1)) as u32,
+            (rand::random::<u16>() % (CANVAS_HEIGHT / 2 - 2)) as u32,
+        );
+        let rand_pos = CanvasSpace(rand_pos);
+
+        let apple_type_num = rand::random::<usize>() % APPLE.len();
+
+        controller.apple = Some((rand_pos, AppleType(APPLE[apple_type_num])));
+    }
+
+    // Check if first element collides with an other element
+    for (index, current) in snake.elements.iter().enumerate() {
+        if index == 0 || index == 1 {
+            continue;
+        }
+
+        if snake.elements.get(0).expect("Snake has at least one element.") == current {
+            lose = true;
+        }
+    }
+
+    if lose {
+        eprintln!("Losed!");
+    }
 }
 
 fn main() -> crossterm::Result<()> {
@@ -214,9 +291,14 @@ fn main() -> crossterm::Result<()> {
         event_queue: Arc::new(Mutex::new(Vec::new())),
         last_event: None,
         snake: Snake {
-            elements: vec![CanvasSpace(((CANVAS_WIDTH/4) as u32, (CANVAS_HEIGHT/4) as u32))],
+            elements: vec![CanvasSpace((
+                (CANVAS_WIDTH / 4) as u32,
+                (CANVAS_HEIGHT / 4 - 1) as u32,
+            ))],
             current_direction: Direction::Stop,
         },
+        apple: None,
+        score: 0,
     };
 
     let event_queue = Arc::clone(&game_controller.event_queue);
@@ -253,6 +335,6 @@ fn main() -> crossterm::Result<()> {
     stdout
         .execute(terminal::LeaveAlternateScreen)?
         .execute(cursor::Show)?;
-        //.execute(event::DisableMouseCapture)?;
+    //.execute(event::DisableMouseCapture)?;
     terminal::disable_raw_mode()
 }
