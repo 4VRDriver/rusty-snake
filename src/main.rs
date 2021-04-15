@@ -81,13 +81,15 @@ fn draw(writer: &mut impl Write, controller: &Controller) -> crossterm::Result<(
     draw_snake(writer, &controller.snake)?;
     draw_apple(writer, controller)?;
 
-    if let Some(event) = controller.last_event {
+    if let Some(_event) = controller.last_event {
+        /* This was helpful while debugging to see which keys were pressed.
         writer
             .queue(cursor::MoveTo(20, 40))?
             .queue(style::PrintStyledContent("Got: ".grey()))?
             .queue(style::PrintStyledContent(
-                format!("{:?}", event).dark_grey(),
+                format!("{:?}", _event).dark_grey(),
             ))?;
+        */
     } else {
         show_logo(writer)?;
     }
