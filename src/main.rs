@@ -29,6 +29,7 @@ enum Direction {
     Right,
     Stop,
 }
+
 #[derive(Debug)]
 struct Controller {
     should_close: bool,
@@ -48,6 +49,7 @@ struct Snake {
 
 #[derive(Debug, Clone, PartialEq)]
 struct CanvasSpace((u32, u32));
+
 #[derive(Debug, Clone, PartialEq)]
 struct TerminalSpace((u32, u32));
 
@@ -82,7 +84,8 @@ fn draw(writer: &mut impl Write, controller: &Controller) -> crossterm::Result<(
     draw_apple(writer, controller)?;
 
     if let Some(_event) = controller.last_event {
-        /* This was helpful while debugging to see which keys were pressed.
+        /*
+        This was helpful while debugging to see which keys were pressed.
         writer
             .queue(cursor::MoveTo(20, 40))?
             .queue(style::PrintStyledContent("Got: ".grey()))?
@@ -177,9 +180,6 @@ fn handle_events(controller: &mut Controller) {
                 event::Event::Mouse(event) => {
                     controller.last_event = Some(event::Event::Mouse(event))
                 }
-                /*event::Event::Resize(x, y) => {
-                    controller.last_event = Some(event::Event::Resize(x, y))
-                }*/
                 _ => ()
             }
         }
@@ -296,7 +296,6 @@ fn main() -> crossterm::Result<()> {
     let mut stdout = stdout();
 
     terminal::enable_raw_mode()?;
-    //stdout.execute(event::EnableMouseCapture)?;
     stdout
         .execute(terminal::EnterAlternateScreen)?
         .execute(cursor::Hide)?;
@@ -356,6 +355,5 @@ fn main() -> crossterm::Result<()> {
     stdout
         .execute(terminal::LeaveAlternateScreen)?
         .execute(cursor::Show)?;
-    //.execute(event::DisableMouseCapture)?;
     terminal::disable_raw_mode()
 }
